@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 4.3)
 
 project(fpsubmit)
 set(fpsubmit_VERSION 0.6)
@@ -11,10 +11,13 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/include CACHE PATH "Installation
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules)
 
+cmake_policy(SET CMP0153 OLD)
+find_package(Taglib REQUIRED)
 find_package(Qt4 COMPONENTS QtCore QtGui QtNetwork REQUIRED)
-find_package(FFmpeg REQUIRED)
+find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil swresample swscale swr)
 find_package(Taglib REQUIRED)
 find_package(Chromaprint REQUIRED)
+
 
 include(${QT_USE_FILE})
 
@@ -110,11 +113,18 @@ set_target_properties(fpsubmit PROPERTIES
 	MACOSX_BUNDLE_BUNDLE_NAME "Acoustid Fingerprinter"
 )
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SWRESAMPLE REQUIRED libswresample)
+target_link_libraries(fpsubmit ${SWRESAMPLE_LIBRARIES} ${SWRESAMPLE_LDFLAGS})
+target_include_directories(fpsubmit PRIVATE ${FFMPEG_SWRESAMPLE_INCLUDE_DIRS})
+
 target_link_libraries(fpsubmit
 	${QT_LIBRARIES}
 	${FFMPEG_LIBAVFORMAT_LIBRARIES}
 	${FFMPEG_LIBAVCODEC_LIBRARIES}
 	${FFMPEG_LIBAVUTIL_LIBRARIES}
+	${FFMPEG_SWRESAMPLE_LIBRARIES}
+	${FFMPEG_LIBRARIES}
 	${TAGLIB_LIBRARIES}
 	${CHROMAPRINT_LIBRARIES}
 )

@@ -1,12 +1,12 @@
 /*
  * Chromaprint -- Audio fingerprinting toolkit
  * Copyright (C) 2010  Lukas Lalinsky <lalinsky@gmail.com>
- * 
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
  * version 2.1 of the License, or (at your option) any later version.
- * 
+ *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
@@ -26,18 +26,11 @@
 #include <algorithm>
 #include <stdint.h>
 extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-
-#define NEW_AVFRAME_API (LIBAVCODEC_VERSION_MAJOR >= 55)
-#if NEW_AVFRAME_API
-#include <libavutil/frame.h>
-#endif
-
-#ifdef HAVE_AV_AUDIO_CONVERT
-#include "ffmpeg/audioconvert.h"
-#include "ffmpeg/samplefmt.h"
-#endif
+	#include <libavcodec/avcodec.h>
+	#include <libavformat/avformat.h>
+	#include <libavutil/frame.h>
+	#include <libavutil/opt.h>
+	#include <libswresample/swresample.h>
 }
 #include "fingerprintcalculator.h"
 
@@ -52,7 +45,7 @@ public:
 
 	int Channels()
 	{
-		return m_codec_ctx->channels;
+		return m_codec_ctx->ch_layout.nb_channels;
 	}
 
 	int SampleRate()
@@ -65,8 +58,7 @@ public:
 		return m_error;
 	}
 
-    //static void lock_manager();
-    static void initialize();
+	static void initialize();
 
 private:
 	uint8_t *m_buffer2;
@@ -76,85 +68,53 @@ private:
 	AVCodecContext *m_codec_ctx;
 	bool m_codec_open;
 	AVStream *m_stream;
-    static QMutex m_mutex;
-    AVFrame *m_frame;
-#ifdef HAVE_AV_AUDIO_CONVERT
-	AVAudioConvert *m_convert_ctx;
-#endif
+	SwrContext *m_swr_ctx;
+	static QMutex m_mutex;
+	AVFrame *m_frame;
 };
-
-/*inline static void Decoder::lock_manager(void **mutex, enum AVLockOp op)
-{
-    switch (op) {
-    case AV_LOCK_CREATE:
-        *mutex = new QMutex();
-        return 1;
-    case AV_LOCK_DESTROY:
-        delete (QMutex *)(*mutex);
-        return 1;
-    case AV_LOCK_ACQUIRE:
-        ((QMutex *)(*mutex))->lock();
-        return 1;
-    case AV_LOCK_RELEASE:
-        ((QMutex *)(*mutex))->unlock();
-        return 1;
-    }
-    return 0;
-}*/
 
 inline void Decoder::initialize()
 {
-	av_register_all();
 	av_log_set_level(AV_LOG_ERROR);
-    //av_lockmgr_register(&Decoder::lock_manager)
 }
 
 inline Decoder::Decoder(const std::string &file_name)
-	: m_file_name(file_name), m_format_ctx(0), m_codec_ctx(0), m_stream(0), m_codec_open(false)
-#ifdef HAVE_AV_AUDIO_CONVERT
-	, m_convert_ctx(0)
-#endif
+: m_file_name(file_name),
+m_format_ctx(nullptr),
+m_codec_ctx(nullptr),
+m_stream(nullptr),
+m_codec_open(false),
+m_swr_ctx(nullptr),
+m_buffer2(nullptr)
 {
-#ifdef HAVE_AV_AUDIO_CONVERT
 	m_buffer2 = (uint8_t *)av_malloc(192000 * 2 + 16);
-#endif
-
-#if NEW_AVFRAME_API
-    m_frame = av_frame_alloc();
-#else
-    m_frame = avcodec_alloc_frame();
-#endif
+	m_frame = av_frame_alloc();
 }
 
 inline Decoder::~Decoder()
 {
-	if (m_codec_ctx && m_codec_open) {
-        QMutexLocker locker(&m_mutex); 
-		avcodec_close(m_codec_ctx);
+	if (m_codec_ctx) {
+		QMutexLocker locker(&m_mutex);
+		avcodec_free_context(&m_codec_ctx);
 	}
 	if (m_format_ctx) {
 		avformat_close_input(&m_format_ctx);
 	}
-#ifdef HAVE_AV_AUDIO_CONVERT
-	if (m_convert_ctx) {
-		av_audio_convert_free(m_convert_ctx);
+	if (m_swr_ctx) {
+		swr_free(&m_swr_ctx);
 	}
-	av_free(m_buffer2);
-#endif
-
-#if NEW_AVFRAME_API
-    av_frame_free(&m_frame);
-#else
-    av_freep(&m_frame);
-#endif
+	if (m_buffer2) {
+		av_free(m_buffer2);
+	}
+	av_frame_free(&m_frame);
 }
 
 inline bool Decoder::Open()
 {
-    QMutexLocker locker(&m_mutex); 
+	QMutexLocker locker(&m_mutex);
 
 	if (avformat_open_input(&m_format_ctx, m_file_name.c_str(), NULL, NULL) != 0) {
-		m_error = "Couldn't open the file." + m_file_name;
+		m_error = "Couldn't open the file: " + m_file_name;
 		return false;
 	}
 
@@ -163,45 +123,57 @@ inline bool Decoder::Open()
 		return false;
 	}
 
-	//dump_format(m_format_ctx, 0, m_file_name.c_str(), 0);
-
-	for (int i = 0; i < m_format_ctx->nb_streams; i++) {
-		AVCodecContext *avctx = m_format_ctx->streams[i]->codec;
-                if (avctx && avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
+	for (int i = 0; i < (int)m_format_ctx->nb_streams; i++) {
+		AVCodecParameters *par = m_format_ctx->streams[i]->codecpar;
+		if (par && par->codec_type == AVMEDIA_TYPE_AUDIO) {
 			m_stream = m_format_ctx->streams[i];
-			m_codec_ctx = avctx;
 			break;
 		}
 	}
-	if (!m_codec_ctx) {
+	if (!m_stream) {
 		m_error = "Couldn't find any audio stream in the file.";
 		return false;
 	}
 
-	AVCodec *codec = avcodec_find_decoder(m_codec_ctx->codec_id);
+	const AVCodec *codec = avcodec_find_decoder(m_stream->codecpar->codec_id);
 	if (!codec) {
 		m_error = "Unknown codec.";
 		return false;
 	}
 
+	m_codec_ctx = avcodec_alloc_context3(codec);
+	if (!m_codec_ctx) {
+		m_error = "Couldn't allocate codec context.";
+		return false;
+	}
+
+	if (avcodec_parameters_to_context(m_codec_ctx, m_stream->codecpar) < 0) {
+		m_error = "Couldn't copy codec parameters to context.";
+		return false;
+	}
+
 	if (avcodec_open2(m_codec_ctx, codec, NULL) < 0) {
-        m_error = "Couldn't open the codec.";
-        return false;
-    }
+		m_error = "Couldn't open the codec.";
+		return false;
+	}
 	m_codec_open = true;
 
 	if (m_codec_ctx->sample_fmt != AV_SAMPLE_FMT_S16) {
-#ifdef HAVE_AV_AUDIO_CONVERT
-		m_convert_ctx = av_audio_convert_alloc(AV_SAMPLE_FMT_S16, m_codec_ctx->channels,
-		                                       (AVSampleFormat)m_codec_ctx->sample_fmt, m_codec_ctx->channels, NULL, 0);
-		if (!m_convert_ctx) {
-			m_error = "Couldn't create sample format converter.";
+		m_swr_ctx = swr_alloc();
+		if (!m_swr_ctx) {
+			m_error = "Couldn't allocate resampler context.";
 			return false;
 		}
-#else
-		m_error = "Unsupported sample format.";
-		return false;
-#endif
+		av_opt_set_chlayout  (m_swr_ctx, "in_chlayout",   &m_codec_ctx->ch_layout, 0);
+		av_opt_set_chlayout  (m_swr_ctx, "out_chlayout",  &m_codec_ctx->ch_layout, 0);
+		av_opt_set_int       (m_swr_ctx, "in_sample_rate",  m_codec_ctx->sample_rate, 0);
+		av_opt_set_int       (m_swr_ctx, "out_sample_rate", m_codec_ctx->sample_rate, 0);
+		av_opt_set_sample_fmt(m_swr_ctx, "in_sample_fmt",  m_codec_ctx->sample_fmt, 0);
+		av_opt_set_sample_fmt(m_swr_ctx, "out_sample_fmt", AV_SAMPLE_FMT_S16,       0);
+		if (swr_init(m_swr_ctx) < 0) {
+			m_error = "Couldn't initialize sample format converter.";
+			return false;
+		}
 	}
 
 	if (Channels() <= 0) {
@@ -217,59 +189,69 @@ inline bool Decoder::Open()
 	return true;
 }
 
-#include <stdio.h>
-
 inline void Decoder::Decode(FingerprintCalculator *consumer, int max_length)
 {
-	AVPacket packet, packet_temp;
+	AVPacket *packet      = av_packet_alloc();
+	AVPacket *packet_temp = av_packet_alloc();
 
 	int remaining = max_length * SampleRate() * Channels();
 	int stop = 0;
 
-	av_init_packet(&packet);
-	av_init_packet(&packet_temp);
 	while (!stop) {
-		if (av_read_frame(m_format_ctx, &packet) < 0) {
-	//		consumer->Flush();	
+		if (av_read_frame(m_format_ctx, packet) < 0) {
 			break;
 		}
 
-		packet_temp.data = packet.data;
-		packet_temp.size = packet.size;
-		while (packet_temp.size > 0) {
-            int got_output;
-            int consumed = avcodec_decode_audio4(m_codec_ctx, m_frame,
-                                                 &got_output, &packet_temp);
+		packet_temp->data = packet->data;
+		packet_temp->size = packet->size;
+
+		while (packet_temp->size > 0) {
+			int got_output = 0;
+			int consumed   = 0;
+
+			int ret = avcodec_send_packet(m_codec_ctx, packet_temp);
+			if (ret == 0) {
+				ret = avcodec_receive_frame(m_codec_ctx, m_frame);
+				if (ret == 0) {
+					got_output = 1;
+					consumed   = packet_temp->size;
+				} else if (ret == AVERROR(EAGAIN)) {
+					got_output = 0;
+					consumed   = packet_temp->size;
+				} else {
+					got_output = 0;
+					consumed   = 0;
+				}
+			} else {
+				got_output = 0;
+				consumed   = 0;
+			}
+
 			if (consumed < 0) {
 				break;
 			}
 
-			packet_temp.data += consumed;
-			packet_temp.size -= consumed;
+			packet_temp->data += consumed;
+			packet_temp->size -= consumed;
 
 			if (!got_output) {
 				continue;
 			}
 
 			int16_t *audio_buffer;
-#ifdef HAVE_AV_AUDIO_CONVERT
-			if (m_convert_ctx) {
-				const void *ibuf[6] = { m_frame->data[0] };
-				void *obuf[6] = { m_buffer2 };
-				int istride[6] = { av_get_bytes_per_sample(m_codec_ctx->sample_fmt) };
-				int ostride[6] = { 2 };
-				int len = m_frame->nb_samples;
-				if (av_audio_convert(m_convert_ctx, obuf, ostride, ibuf, istride, len) < 0) {
+
+			if (m_swr_ctx) {
+				uint8_t *out_buf = m_buffer2;
+				int out_samples  = m_frame->nb_samples;
+				if (swr_convert(m_swr_ctx,
+					&out_buf,                        out_samples,
+					(const uint8_t **)m_frame->data, m_frame->nb_samples) < 0) {
 					break;
-				}
-				audio_buffer = (int16_t *)m_buffer2;
-			}
-			else {
+					}
+					audio_buffer = (int16_t *)m_buffer2;
+			} else {
 				audio_buffer = (int16_t *)m_frame->data[0];
 			}
-#else
-			audio_buffer = (int16_t *)m_frame->data[0];
-#endif
 
 			int length = m_frame->nb_samples;
 			if (max_length) {
@@ -287,10 +269,11 @@ inline void Decoder::Decode(FingerprintCalculator *consumer, int max_length)
 			}
 		}
 
-		if (packet.data) {
-			av_free_packet(&packet);
-		}
+		av_packet_unref(packet);
 	}
+
+	av_packet_free(&packet);
+	av_packet_free(&packet_temp);
 }
 
 #endif
