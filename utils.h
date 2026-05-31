@@ -2,7 +2,7 @@
 #define FPSUBMIT_UTILS_H_
 
 #include <QString>
-#include <QDesktopServices>
+#include <QStandardPaths>
 
 inline QString userAgentString()
 {
@@ -11,7 +11,7 @@ inline QString userAgentString()
 
 inline QString cacheFileName()
 {
-	return QDesktopServices::storageLocation(QDesktopServices::CacheLocation) + "/submitted.log";
+	return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/submitted.log";
 }
 
 inline QString extractExtension(const QString &fileName)
@@ -20,7 +20,7 @@ inline QString extractExtension(const QString &fileName)
 	if (pos == -1) {
 		return "";
 	}
-    return fileName.mid(pos + 1).toUpper();
+	return fileName.mid(pos + 1).toUpper();
 }
 
 #endif

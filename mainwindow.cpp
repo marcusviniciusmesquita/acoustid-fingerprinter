@@ -2,6 +2,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QDesktopServices>
+#include <QStandardPaths>
 #include <QUrl>
 #include <QLineEdit>
 #include <QDialogButtonBox>
@@ -23,16 +24,15 @@ MainWindow::MainWindow()
 
 void MainWindow::setupUi()
 {
-
 	QTreeView *treeView = new QTreeView();
 
 	m_directoryModel = new CheckableDirModel();
 	m_directoryModel->setFilter(QDir::AllDirs | QDir::NoDotAndDotDot);
-#ifdef Q_WS_MAC
+	#ifdef Q_OS_MAC
 	m_directoryModel->setRootPath("/Volumes");
-#else
+	#else
 	m_directoryModel->setRootPath("");
-#endif
+	#endif
 
 	treeView->setModel(m_directoryModel);
 	treeView->setHeaderHidden(true);
@@ -40,8 +40,7 @@ void MainWindow::setupUi()
 	treeView->hideColumn(2);
 	treeView->hideColumn(3);
 
-//	QString homePath = QDir::homePath();
-	QString homePath = QDesktopServices::storageLocation(QDesktopServices::MusicLocation);
+	QString homePath = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
 	const QModelIndex homePathIndex = m_directoryModel->index(homePath);
 	treeView->expand(homePathIndex);
 	treeView->selectionModel()->setCurrentIndex(homePathIndex, QItemSelectionModel::ClearAndSelect);
@@ -109,10 +108,10 @@ void MainWindow::fingerprint()
 	QSettings settings;
 	settings.setValue("apikey", apiKey);
 	Fingerprinter *fingerprinter = new Fingerprinter(apiKey, directories);
-    ProgressDialog *progressDialog = new ProgressDialog(this, fingerprinter);
+	ProgressDialog *progressDialog = new ProgressDialog(this, fingerprinter);
 	fingerprinter->start();
-    progressDialog->setModal(true);
-    progressDialog->show();
+	progressDialog->setModal(true);
+	progressDialog->show();
 }
 
 bool MainWindow::validateFields(QString &apiKey, QList<QString> &directories)
@@ -120,18 +119,17 @@ bool MainWindow::validateFields(QString &apiKey, QList<QString> &directories)
 	apiKey = m_apiKeyEdit->text();
 	if (apiKey.isEmpty()) {
 		QMessageBox::warning(this, tr("Error"),
-			tr("Please enter your Acoustid API key. You can get an API key "
-			"from the <a href=\"%1\">Acoustid website</a> after signing in "
-			"with your MusicBrainz account or any OpenID (Google, Yahoo, "
-			"etc.)").arg(API_KEY_URL));
+							 tr("Please enter your Acoustid API key. You can get an API key "
+							 "from the <a href=\"%1\">Acoustid website</a> after signing in "
+							 "with your MusicBrainz account or any OpenID (Google, Yahoo, "
+							 "etc.)").arg(API_KEY_URL));
 		return false;
 	}
 	directories = m_directoryModel->selectedDirectories();
 	if (directories.isEmpty()) {
 		QMessageBox::warning(this, tr("Error"),
-			tr("Please select one or more folders with audio files to fingerprint."));
+							 tr("Please select one or more folders with audio files to fingerprint."));
 		return false;
 	}
 	return true;
 }
-

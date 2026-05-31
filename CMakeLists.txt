@@ -1,94 +1,89 @@
 cmake_minimum_required(VERSION 4.3)
-
 project(fpsubmit)
 set(fpsubmit_VERSION 0.6)
-
 set(LIB_SUFFIX "" CACHE STRING "Define suffix of directory name (32/64)")
 set(EXEC_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE PATH "Installation prefix for executables and object code libraries" FORCE)
 set(BIN_INSTALL_DIR ${EXEC_INSTALL_PREFIX}/bin CACHE PATH "Installation prefix for user executables" FORCE)
 set(LIB_INSTALL_DIR ${EXEC_INSTALL_PREFIX}/lib${LIB_SUFFIX} CACHE PATH  "Installation prefix for object code libraries" FORCE)
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/include CACHE PATH "Installation prefix for C header files" FORCE)
-
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules)
 
-cmake_policy(SET CMP0153 OLD)
 find_package(Taglib REQUIRED)
-find_package(Qt4 COMPONENTS QtCore QtGui QtNetwork REQUIRED)
-find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil swresample swscale swr)
-find_package(Taglib REQUIRED)
+find_package(Qt5 COMPONENTS Core Gui Network Widgets REQUIRED)
+find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil swresample swscale)
 find_package(Chromaprint REQUIRED)
 
-
-include(${QT_USE_FILE})
+# Enable Qt5 automatic MOC, UIC and RCC
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL Release OR CMAKE_BUILD_TYPE STREQUAL MinSizeRel OR CMAKE_BUILD_TYPE STREQUAL RelWithDebInfo)
-	add_definitions(-DQT_NO_DEBUG_OUTPUT)
-endif(CMAKE_BUILD_TYPE STREQUAL Release OR CMAKE_BUILD_TYPE STREQUAL MinSizeRel OR CMAKE_BUILD_TYPE STREQUAL RelWithDebInfo)
+    add_definitions(-DQT_NO_DEBUG_OUTPUT)
+endif()
 
 set(fpsubmit_HEADERS
-	checkabledirmodel.h
-	progressdialog.h
-	fingerprinter.h
-	mainwindow.h
-	loadfilelisttask.h
-	analyzefiletask.h
+    checkabledirmodel.h
+    progressdialog.h
+    fingerprinter.h
+    mainwindow.h
+    loadfilelisttask.h
+    analyzefiletask.h
 )
 set(fpsubmit_SOURCES
-	checkabledirmodel.cpp
-	progressdialog.cpp
-	fingerprinter.cpp
-	fingerprintcalculator.cpp
-	tagreader.cpp
-	mainwindow.cpp
-	decoder.cpp
-	main.cpp
-	loadfilelisttask.cpp
-	analyzefiletask.cpp
-	updatelogfiletask.cpp
-	crc.c
-	gzip.cpp
+    checkabledirmodel.cpp
+    progressdialog.cpp
+    fingerprinter.cpp
+    fingerprintcalculator.cpp
+    tagreader.cpp
+    mainwindow.cpp
+    decoder.cpp
+    main.cpp
+    loadfilelisttask.cpp
+    analyzefiletask.cpp
+    updatelogfiletask.cpp
+    crc.c
+    gzip.cpp
 )
+
 #set(fpsubmit_UIS fpsubmit.ui)
 set(fpsubmit_RESOURCES fingerprinter.qrc)
 
-qt4_wrap_cpp(fpsubmit_MOC ${fpsubmit_HEADERS})
-qt4_wrap_ui(fpsubmit_UIS_H ${fpsubmit_UIS})
-qt4_add_resources(fpsubmit_RESOURCES_CPP ${fpsubmit_RESOURCES})
-
 if(WIN32)
-	set(fpsubmit_SOURCES ${fpsubmit_SOURCES} fingerprinter.rc)
+    set(fpsubmit_SOURCES ${fpsubmit_SOURCES} fingerprinter.rc)
 endif()
 
 add_definitions(
-	-D__STDC_LIMIT_MACROS
-	-D__STDC_CONSTANT_MACROS
-	-DVERSION="${fpsubmit_VERSION}"
+    -D__STDC_LIMIT_MACROS
+    -D__STDC_CONSTANT_MACROS
+    -DVERSION="${fpsubmit_VERSION}"
 )
 
 include_directories(
-	${CMAKE_CURRENT_BINARY_DIR}
-	${FFMPEG_LIBAVCODEC_INCLUDE_DIRS}
-	${FFMPEG_LIBAVFORMAT_INCLUDE_DIRS}
-	${FFMPEG_LIBAVUTIL_INCLUDE_DIRS}
-	${TAGLIB_INCLUDES}
-	${CHROMAPRINT_INCLUDE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${FFMPEG_LIBAVCODEC_INCLUDE_DIRS}
+    ${FFMPEG_LIBAVFORMAT_INCLUDE_DIRS}
+    ${FFMPEG_LIBAVUTIL_INCLUDE_DIRS}
+    ${TAGLIB_INCLUDES}
+    ${CHROMAPRINT_INCLUDE_DIR}
 )
 
 set(CMAKE_REQUIRED_LIBRARIES
-	${FFMPEG_LIBAVFORMAT_LIBRARIES}
-	${FFMPEG_LIBAVCODEC_LIBRARIES}
-	${FFMPEG_LIBAVUTIL_LIBRARIES}
-	${EXTRA_LIBS})
+    ${FFMPEG_LIBAVFORMAT_LIBRARIES}
+    ${FFMPEG_LIBAVCODEC_LIBRARIES}
+    ${FFMPEG_LIBAVUTIL_LIBRARIES}
+    ${EXTRA_LIBS}
+)
+
 include(CheckFunctionExists)
 check_function_exists(av_audio_convert HAVE_AV_AUDIO_CONVERT)
-
 if(HAVE_AV_AUDIO_CONVERT)
-	add_definitions(-DHAVE_AV_AUDIO_CONVERT)
+    add_definitions(-DHAVE_AV_AUDIO_CONVERT)
 endif()
 
 if(WIN32)
-set(GUI_TYPE WIN32)
-endif(WIN32)
+    set(GUI_TYPE WIN32)
+endif()
 
 if(APPLE)
     set(GUI_TYPE MACOSX_BUNDLE)
@@ -96,45 +91,55 @@ if(APPLE)
     set_source_files_properties(${fpsubmit_ICON_FILE}
         PROPERTIES
         MACOSX_PACKAGE_LOCATION Resources)
-	set(fpsubmit_SOURCES ${fpsubmit_SOURCES} ${fpsubmit_ICON_FILE})
+    set(fpsubmit_SOURCES ${fpsubmit_SOURCES} ${fpsubmit_ICON_FILE})
 endif()
 
 add_executable(fpsubmit ${GUI_TYPE}
     ${fpsubmit_SOURCES}
-    ${fpsubmit_MOC}
-    ${fpsubmit_UIS_H}
-    ${fpsubmit_RESOURCES_CPP}
+    ${fpsubmit_HEADERS}
+    ${fpsubmit_RESOURCES}
 )
 
 set_target_properties(fpsubmit PROPERTIES
-	OUTPUT_NAME acoustid-fingerprinter
+    OUTPUT_NAME acoustid-fingerprinter
     MACOSX_BUNDLE_ICON_FILE acoustid-fp.icns
-	MACOSX_BUNDLE_INFO_STRING "Acoustid Fingerprinter ${fpsubmit_VERSION}"
-	MACOSX_BUNDLE_BUNDLE_NAME "Acoustid Fingerprinter"
+    MACOSX_BUNDLE_INFO_STRING "Acoustid Fingerprinter ${fpsubmit_VERSION}"
+    MACOSX_BUNDLE_BUNDLE_NAME "Acoustid Fingerprinter"
 )
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(SWRESAMPLE REQUIRED libswresample)
-target_link_libraries(fpsubmit ${SWRESAMPLE_LIBRARIES} ${SWRESAMPLE_LDFLAGS})
-target_include_directories(fpsubmit PRIVATE ${FFMPEG_SWRESAMPLE_INCLUDE_DIRS})
+pkg_check_modules(SWRESAMPLE REQUIRED IMPORTED_TARGET libswresample)
+
+target_include_directories(fpsubmit PRIVATE
+    ${FFMPEG_LIBAVCODEC_INCLUDE_DIRS}
+    ${FFMPEG_LIBAVFORMAT_INCLUDE_DIRS}
+    ${FFMPEG_LIBAVUTIL_INCLUDE_DIRS}
+    ${FFMPEG_SWRESAMPLE_INCLUDE_DIRS}
+    ${TAGLIB_INCLUDES}
+    ${CHROMAPRINT_INCLUDE_DIR}
+)
 
 target_link_libraries(fpsubmit
-	${QT_LIBRARIES}
-	${FFMPEG_LIBAVFORMAT_LIBRARIES}
-	${FFMPEG_LIBAVCODEC_LIBRARIES}
-	${FFMPEG_LIBAVUTIL_LIBRARIES}
-	${FFMPEG_SWRESAMPLE_LIBRARIES}
-	${FFMPEG_LIBRARIES}
-	${TAGLIB_LIBRARIES}
-	${CHROMAPRINT_LIBRARIES}
+    Qt5::Core
+    Qt5::Gui
+    Qt5::Network
+    Qt5::Widgets
+    ${FFMPEG_LIBAVFORMAT_LIBRARIES}
+    ${FFMPEG_LIBAVCODEC_LIBRARIES}
+    ${FFMPEG_LIBAVUTIL_LIBRARIES}
+    ${FFMPEG_SWRESAMPLE_LIBRARIES}
+    ${FFMPEG_LIBRARIES}
+    ${TAGLIB_LIBRARIES}
+    ${CHROMAPRINT_LIBRARIES}
+    PkgConfig::SWRESAMPLE
 )
 
 if(APPLE)
-	target_link_libraries(fpsubmit "-framework Accelerate -lz")
+    target_link_libraries(fpsubmit "-framework Accelerate -lz")
 endif()
 
 if(UNIX)
-	install(FILES acoustid-fingerprinter.desktop DESTINATION share/applications)
+    install(FILES acoustid-fingerprinter.desktop DESTINATION share/applications)
 endif()
 
 install(TARGETS fpsubmit DESTINATION ${BIN_INSTALL_DIR})

@@ -1,11 +1,12 @@
 #include <QDebug>
 #include <QDir>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QNetworkProxy>
 #include <QNetworkProxyFactory>
-#include <QDesktopServices>
+#include <QStandardPaths>
 #include <QMutexLocker>
 #include <QThreadPool>
 #include "loadfilelisttask.h"
@@ -26,7 +27,7 @@ public:
 			QUrl url = QUrl::fromEncoded(QByteArray(httpProxyUrl));
 			if (url.isValid() && !url.host().isEmpty()) {
 				m_httpProxy = QNetworkProxy(QNetworkProxy::HttpProxy, url.host(), url.port(80));
-				if (!url.userName().isEmpty())	{
+				if (!url.userName().isEmpty()) {
 					m_httpProxy.setUser(url.userName());
 					if (!url.password().isEmpty()) {
 						m_httpProxy.setPassword(url.password());
@@ -59,8 +60,8 @@ private:
 };
 
 Fingerprinter::Fingerprinter(const QString &apiKey, const QStringList &directories)
-    : m_apiKey(apiKey), m_directories(directories), m_paused(false), m_cancelled(false),
-	  m_finished(false), m_reply(0), m_activeFiles(0), m_fingerprintedFiles(0), m_submittedFiles(0)
+: m_apiKey(apiKey), m_directories(directories), m_paused(false), m_cancelled(false),
+m_finished(false), m_reply(0), m_activeFiles(0), m_fingerprintedFiles(0), m_submittedFiles(0)
 {
 	m_networkAccessManager = new QNetworkAccessManager(this);
 	m_networkAccessManager->setProxyFactory(new NetworkProxyFactory());
@@ -106,21 +107,9 @@ void Fingerprinter::cancel()
 	}
 }
 
-bool Fingerprinter::isPaused()
-{
-	return m_paused;
-}
-
-bool Fingerprinter::isCancelled()
-{
-	return m_cancelled;
-}
-
-bool Fingerprinter::isFinished()
-{
-	return m_finished;
-}
-
+bool Fingerprinter::isPaused()  { return m_paused; }
+bool Fingerprinter::isCancelled() { return m_cancelled; }
+bool Fingerprinter::isFinished()  { return m_finished; }
 bool Fingerprinter::isRunning()
 {
 	return !isPaused() && !isCancelled() && !isFinished();
@@ -143,9 +132,7 @@ void Fingerprinter::onFileListLoaded(const QStringList &files)
 
 void Fingerprinter::fingerprintNextFile()
 {
-	if (m_files.isEmpty()) {
-		return;
-	}
+	if (m_files.isEmpty()) return;
 	m_activeFiles++;
 	QString path = m_files.takeFirst();
 	emit currentPathChanged(path);
@@ -188,59 +175,64 @@ bool Fingerprinter::maybeSubmit(bool force)
 	int size = qMin(MAX_BATCH_SIZE, m_submitQueue.size());
 	if (!m_reply && (size >= MIN_BATCH_SIZE || (force && size > 0))) {
 		qDebug() << "Submitting" << size << "fingerprints";
-		QUrl url;
-		url.addQueryItem("user", m_apiKey);
-		url.addQueryItem("client", CLIENT_API_KEY);
+
+		QUrlQuery query;
+		query.addQueryItem("user", m_apiKey);
+		query.addQueryItem("client", CLIENT_API_KEY);
+
 		for (int i = 0; i < size; i++) {
 			AnalyzeResult *result = m_submitQueue.takeFirst();
 			qDebug() << "  " << result->mbid;
-			url.addQueryItem(QString("duration.%1").arg(i), QString::number(result->length));
+			query.addQueryItem(QString("duration.%1").arg(i), QString::number(result->length));
 			if (!result->puid.isEmpty()) {
-				url.addQueryItem(QString("puid.%1").arg(i), result->puid);
+				query.addQueryItem(QString("puid.%1").arg(i), result->puid);
 			}
 			if (!result->mbid.isEmpty()) {
-				url.addQueryItem(QString("mbid.%1").arg(i), result->mbid);
+				query.addQueryItem(QString("mbid.%1").arg(i), result->mbid);
 			}
 			else {
 				if (!result->track.isEmpty()) {
-					url.addQueryItem(QString("track.%1").arg(i), result->track);
+					query.addQueryItem(QString("track.%1").arg(i), result->track);
 				}
 				if (!result->artist.isEmpty()) {
-					url.addQueryItem(QString("artist.%1").arg(i), result->artist);
+					query.addQueryItem(QString("artist.%1").arg(i), result->artist);
 				}
 				if (!result->album.isEmpty()) {
-					url.addQueryItem(QString("album.%1").arg(i), result->album);
+					query.addQueryItem(QString("album.%1").arg(i), result->album);
 				}
 				if (!result->albumArtist.isEmpty()) {
-					url.addQueryItem(QString("albumartist.%1").arg(i), result->albumArtist);
+					query.addQueryItem(QString("albumartist.%1").arg(i), result->albumArtist);
 				}
 				if (result->year) {
-					url.addQueryItem(QString("year.%1").arg(i), QString::number(result->year));
+					query.addQueryItem(QString("year.%1").arg(i), QString::number(result->year));
 				}
 				if (result->trackNo) {
-					url.addQueryItem(QString("trackno.%1").arg(i), QString::number(result->trackNo));
+					query.addQueryItem(QString("trackno.%1").arg(i), QString::number(result->trackNo));
 				}
 				if (result->discNo) {
-					url.addQueryItem(QString("discno.%1").arg(i), QString::number(result->discNo));
+					query.addQueryItem(QString("discno.%1").arg(i), QString::number(result->discNo));
 				}
 			}
-			url.addQueryItem(QString("fingerprint.%1").arg(i), result->fingerprint);
+			query.addQueryItem(QString("fingerprint.%1").arg(i), result->fingerprint);
 			QString format = extractExtension(result->fileName);
 			if (!format.isEmpty()) {
-				url.addQueryItem(QString("fileformat.%1").arg(i), format);
+				query.addQueryItem(QString("fileformat.%1").arg(i), format);
 			}
 			if (result->bitrate) {
-				url.addQueryItem(QString("bitrate.%1").arg(i), QString::number(result->bitrate));
+				query.addQueryItem(QString("bitrate.%1").arg(i), QString::number(result->bitrate));
 			}
 			m_submitting.append(result->fileName);
 			delete result;
 		}
-		qDebug() << url.encodedQuery();
+
+		QByteArray postData = query.toString(QUrl::FullyEncoded).toLatin1();
+		qDebug() << postData;
+
 		QNetworkRequest request = QNetworkRequest(QUrl::fromEncoded(SUBMIT_URL));
 		request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 		request.setRawHeader("Content-Encoding", "gzip");
-		request.setRawHeader("User-Agent", userAgentString().toAscii());
-		m_reply = m_networkAccessManager->post(request, gzipCompress(url.encodedQuery()));
+		request.setRawHeader("User-Agent", userAgentString().toLatin1());
+		m_reply = m_networkAccessManager->post(request, gzipCompress(postData));
 		return true;
 	}
 	return false;
@@ -250,7 +242,6 @@ void Fingerprinter::onRequestFinished(QNetworkReply *reply)
 {
 	bool stop = false;
 	QNetworkReply::NetworkError error = reply->error();
-
 	if (m_cancelled) {
 		stop = true;
 	}
@@ -269,31 +260,26 @@ void Fingerprinter::onRequestFinished(QNetworkReply *reply)
 		emit networkError(reply->errorString());
 		stop = true;
 	}
-
 	if (!stop && error == QNetworkReply::NoError) {
 		m_submitted.append(m_submitting);
 		m_submittedFiles += m_submitting.size();
 		maybeSubmit();
-		qDebug() << "Submission finished"; 
+		qDebug() << "Submission finished";
 	}
-
 	if (m_submitted.size() > 0) {
 		UpdateLogFileTask *task = new UpdateLogFileTask(m_submitted);
 		task->setAutoDelete(true);
 		QThreadPool::globalInstance()->start(task);
 		m_submitted.clear();
 	}
-
 	m_submitting.clear();
 	reply->deleteLater();
 	m_reply = 0;
-
 	if (m_submitQueue.isEmpty() && m_files.isEmpty()) {
 		m_finished = true;
 		emit finished();
 		return;
 	}
-
 	if (isRunning()) {
 		maybeSubmit(m_files.isEmpty());
 	}

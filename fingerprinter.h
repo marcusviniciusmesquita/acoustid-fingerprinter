@@ -5,7 +5,7 @@
 #include <QDir>
 #include <QMutex>
 #include <QNetworkAccessManager>
-#include <QTime>
+#include <QElapsedTimer>
 
 class AnalyzeResult;
 class QNetworkReply;
@@ -60,7 +60,7 @@ private:
 	QStringList m_submitted;
 	QNetworkReply *m_reply;
 
-	QTime m_time;
+	QElapsedTimer m_time;
 	int m_fingerprintedFiles;
 	int m_submittedFiles;
 	int m_activeFiles;
